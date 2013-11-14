@@ -1,0 +1,248 @@
+
+/***********************************************************************************************
+                                     MODEL E (Loopy Belief) 
+************************************************************************************************/
+/*
+This method is used to set a default value for a matrix of type SDoublePlane
+*/
+
+void set_temp (SDoublePlane &t,int rows,int cols)
+{
+  for(int i = 0; i<rows ; i++)
+  {
+    for(int j =0; j<cols ; j++)
+    {
+      t[i][j] = 0;
+    }
+  }
+}
+
+/*This function calculates the phi(Li,Lj) for the loopy function - similar to the one used before
+except that there is no corresponding coordinate assignment done here.
+*/
+
+SDoublePlane Phi_calculator_loopy(Coordinate mean, Coordinate var,SDoublePlane my_potential) //returns an array of coordinates, which is the best possible assignments for two parts i and j
+{
+  int rows = my_potential.rows();
+  int cols = my_potential.cols();
+  SDoublePlane phi = SDoublePlane(rows,cols);
+  for (int i=0; i<rows; i++)
+  {
+    for (int j=0; j<cols; j++)
+    {
+      phi[i][j] = -1e100;
+    }
+
+  }
+  for(int ix = 0; ix<rows; ix++)
+  {
+    for(int iy = 0; iy<cols; iy++)
+    {
+      double max_phi = -1e100;
+      for (int jx = 0; jx<rows; jx+=STEP_SIZE)
+      {
+        for (int jy = 0; jy<cols; jy+=STEP_SIZE)
+        {
+          double t1 = pow(ix-jx-mean.row,2)/(2*var.row);
+          double t2 = pow(iy-jy-mean.col,2)/(2*var.col);
+          double temp = -t1-t2+my_potential[jx][jy];
+          if(temp>max_phi)
+          {
+            max_phi = temp;
+          }
+        }
+      }
+      phi[ix][iy] = max_phi;
+    }
+  }
+  return phi;
+
+} 
+
+/*
+Function that takes in 2 SDoublePlane matrices a and b and returns another SDoublePlane that is the sum
+of the corresponding elements in a and b.
+*/
+
+SDoublePlane add (SDoublePlane a,SDoublePlane b,int rows,int cols)
+{
+  SDoublePlane result = SDoublePlane(rows,cols);
+  for (int i=0; i<rows; i++)
+  {
+    for (int j=0; j<cols; j++)
+    {
+      result[i][j] = -1e100;
+    }
+
+  }
+  for (int i = 0; i < rows ; i++ )
+  {
+    for ( int j = 0; j < cols ; j++ )
+    {
+      result[i][j] = a[i][j] + b[i][j];
+    }
+  }
+  return result;
+}
+
+/*
+Function which takes two SDoublePlane matrices and assigns the rhs to the lhs.
+*/
+
+void assign (SDoublePlane &lhs,SDoublePlane rhs,int rows,int cols)
+{
+  for (int i =0; i<rows;i++)
+  {
+    for (int j=0;j<cols;j++)
+    {
+      lhs[i][j] = rhs[i][j];
+    }
+  }
+}
+
+/*
+Main Loopy Belief propagation method for model E of the assignment
+*/
+
+GTImage loopy(vector <SDoublePlane>my_potentials, string filename, Coordinate *means[6], Coordinate *vars[6])
+{
+  /*
+  Here each node of the graph maintains two tables, one which stores the updated belief state at time
+  t+1 and another for its belief state at time t.
+  We denote them as node_message (for time t+1) and node_message_old (for time t).
+  */
+  //This part is used to make sure that means for part pairs (Li,Lj) and (Lj,Li) are different 
+  // and negative of each other.
+  for(int i=0; i<PART_COUNT; i++) 
+  {
+    for(int j=0; j<i; j++)
+    {
+        means[i][j].row = - means[j][i].row;
+        means[i][j].col = - means[j][i].col;
+        vars[i][j].row = vars[j][i].row;
+        vars[i][j].col = vars[j][i].col;
+    }
+  }
+
+  cout<<"\n Starting Loopy..."<<endl;
+  //getting details about the image used
+  SDoublePlane image1 = SImageIO::read_png_file(filename.c_str());
+  int rows = image1.rows();//number of rows in the image
+  int cols = image1.cols(); //number of cols in the image
+  
+
+  
+  //Initialize the messages
+  //node_message is the updated node_table
+  vector <SDoublePlane>node_message (6,SDoublePlane(rows,cols)); 
+  //node_message_old is the node table at time t-1
+  vector <SDoublePlane>node_message_old (6,SDoublePlane(rows,cols));
+  //give a default value to all the messages
+  for ( int ii=0 ; ii<6 ; ii++ )
+  {
+    for ( int i=0 ; i<rows ; i++ )
+    {
+      for ( int j=0 ; j<cols ; j++ )
+      {
+        
+          node_message[ii][i][j] = 0;
+          node_message_old[ii][i][j] = 0;
+      }
+    }
+  }
+  //The loop starts here - i denotes the number of iterations of the loop
+ 
+
+  for (int i = 0; i<2 ; i++)
+  {
+    cout<<"Iteration "<<i+1<<endl;
+    //This loop runs for all the nodes in the graph. Each node updates the belief state of its neighbours
+    //using its own belief state, the belief states of all its other neighnours and the phi between it and 
+    //its neighbour.
+    for (int node = 0; node < 6; node++ )
+    {
+      cout<<"Computing updates for node "<<node<<endl;
+      if ( node == 0 )
+      {
+        // Update belief table for Left Mouth and Right Eye
+        assign(node_message[3],add(add(node_message_old[3],add(add(node_message_old[1],my_potentials[0],rows,cols),Phi_calculator_loopy(means[0][3],vars[0][3],my_potentials[3]),rows,cols),rows,cols),node_message_old[0],rows,cols),rows,cols);
+        assign(node_message[1],add(add(node_message_old[1],add(add(node_message_old[3],my_potentials[0],rows,cols),Phi_calculator_loopy(means[0][1],vars[0][1],my_potentials[1]),rows,cols),rows,cols),node_message_old[0],rows,cols),rows,cols);
+        
+      }
+      if ( node == 1 )
+      {
+        //Update belief table for Left Eye, Nose and Right Mouth
+        assign(node_message[0] , add(add(add(node_message_old[0],node_message_old[2],rows,cols),add(add(node_message_old[4],my_potentials[1],rows,cols),Phi_calculator_loopy(means[1][0],vars[1][0],my_potentials[0]),rows,cols),rows,cols),node_message_old[1],rows,cols),rows,cols);
+        assign(node_message[2] , add(add(add(node_message_old[2],node_message_old[0],rows,cols),add(add(node_message_old[4],my_potentials[1],rows,cols),Phi_calculator_loopy(means[1][2],vars[1][2],my_potentials[2]),rows,cols),rows,cols),node_message_old[1],rows,cols),rows,cols);
+        assign(node_message[4] , add(add(add(node_message_old[4],node_message_old[0],rows,cols),add(add(node_message_old[2],my_potentials[1],rows,cols),Phi_calculator_loopy(means[1][4],vars[1][4],my_potentials[4]),rows,cols),rows,cols),node_message_old[1],rows,cols),rows,cols);
+      }
+      if ( node == 2 )
+      {
+        //Update belief table for Right Eye and Chin
+        assign(node_message[1] , add(add(add(node_message_old[1],node_message_old[5],rows,cols),add(my_potentials[2],Phi_calculator_loopy(means[2][1],vars[2][1],my_potentials[1]),rows,cols),rows,cols),node_message_old[2],rows,cols),rows,cols);
+        assign(node_message[5] , add(add(add(node_message_old[5],node_message_old[1],rows,cols),add(my_potentials[2],Phi_calculator_loopy(means[2][5],vars[2][5],my_potentials[5]),rows,cols),rows,cols),node_message_old[2],rows,cols),rows,cols);
+      }
+      if ( node == 3 )
+      {
+        //Update belief table for Left Eye and Chin
+        assign(node_message[0] , add(add(add(node_message_old[0],node_message_old[5],rows,cols),add(my_potentials[3],Phi_calculator_loopy(means[3][0],vars[3][0],my_potentials[0]),rows,cols),rows,cols),node_message_old[3],rows,cols),rows,cols);
+        assign(node_message[5] , add(add(add(node_message_old[5],node_message_old[0],rows,cols),add(my_potentials[3],Phi_calculator_loopy(means[3][5],vars[3][5],my_potentials[5]),rows,cols),rows,cols),node_message_old[3],rows,cols),rows,cols);
+      }
+      if ( node == 4)
+      {
+        //Update belief table for Right Eye and Chin
+        assign(node_message[1] , add(add(add(node_message_old[1],node_message_old[5],rows,cols),add(my_potentials[4],Phi_calculator_loopy(means[4][1],vars[4][1],my_potentials[1]),rows,cols),rows,cols),node_message_old[4],rows,cols),rows,cols);
+        assign(node_message[5] , add(add(add(node_message_old[5],node_message_old[1],rows,cols),add(my_potentials[4],Phi_calculator_loopy(means[4][5],vars[4][5],my_potentials[5]),rows,cols),rows,cols),node_message_old[4],rows,cols),rows,cols);
+      }
+      if( node == 5 )
+      {
+        //Update belief table for Nose, Left Mouth and Right Mouth
+        assign(node_message[2] , add(add(add(node_message_old[2],node_message_old[3],rows,cols),add(add(node_message_old[4],my_potentials[5],rows,cols),Phi_calculator_loopy(means[5][2],vars[5][2],my_potentials[2]),rows,cols),rows,cols),node_message_old[5],rows,cols),rows,cols);
+        assign(node_message[3] , add(add(add(node_message_old[3],node_message_old[2],rows,cols),add(add(node_message_old[4],my_potentials[5],rows,cols),Phi_calculator_loopy(means[5][3],vars[5][3],my_potentials[3]),rows,cols),rows,cols),node_message_old[5],rows,cols),rows,cols);
+        assign(node_message[4] , add(add(add(node_message_old[4],node_message_old[2],rows,cols),add(add(node_message_old[3],my_potentials[5],rows,cols),Phi_calculator_loopy(means[5][4],vars[5][4],my_potentials[4]),rows,cols),rows,cols),node_message_old[5],rows,cols),rows,cols);
+      }
+    }//end-for for all nodes
+    //Assign the new node tables as the old tables.
+    for( int n = 0; n<6 ; n++ )
+    {
+      assign(node_message_old[n],node_message[n],rows,cols);
+    }
+  }//end-for main loop
+  //This part finds the best assignment of pixels for each node using its updated belief state.
+  vector <Coordinate>best_configuration(6);
+  for ( int node = 0; node < 6 ; node++ )
+  {
+    double temp = -1e100; //keeps a track of the maximum pixel value
+    Coordinate temp_cord;
+
+    for (int i = 0; i<rows ; i++)
+    {
+      for ( int j = 0; j<cols ; j++)
+      {
+        if (node_message[node][i][j] >= temp) //Check if the value is greater than the previous max value
+        {
+          temp = node_message[node][i][j];
+          temp_cord.row = i;
+          temp_cord.col = j;
+        }
+      }
+    }
+    best_configuration[node].row = temp_cord.row;
+    cout<<"Node: "<<node<<" Row: "<<best_configuration[node].row<<endl;
+    best_configuration[node].col = temp_cord.col;
+    cout<<"Node: "<<node<<" Col: "<<best_configuration[node].col<<endl;
+  }
+  //draw_configuration("LOOPY.png", filename.c_str(), best_configuration);
+  
+  GTImage answer;
+  answer.image_filename = filename;
+  for (int i=0; i<6; i++)
+  {
+    answer.coords[i].row = best_configuration[i].row;  
+    answer.coords[i].col = best_configuration[i].col;
+  }
+  return answer;
+  
+  
+
+} //end of method
